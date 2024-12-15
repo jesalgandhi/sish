@@ -27,13 +27,9 @@ get_options(int argc, char **argv)
 		switch (ch) {
 		case 'x':
 			tracing = true;
-			if (tracing) {
-				printf("tracing true\n");
-			}
 			break;
 		case 'c':
 			c_cmd = optarg;
-			printf("%s\n", c_cmd);
 			break;
 		case '?':
 		default:
