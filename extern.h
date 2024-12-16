@@ -7,6 +7,7 @@
 /* global commandline arg variables */
 extern char *c_cmd;
 extern bool tracing;
+extern bool exit_flag;
 
 /* signal var */
 extern volatile sig_atomic_t sig_recv;
