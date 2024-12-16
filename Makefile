@@ -1,5 +1,5 @@
 PROG=	sish
-OBJS=	sish.o opts.o sighandlers.o
+OBJS=	sish.o opts.o sighandlers.o tokenize.o exec.o
 
 CFLAGS = -Wall -Werror -Wextra -Wformat=2 -Wjump-misses-init -Wlogical-op -Wundef -Wshadow -Wpointer-arith -Wwrite-strings -Wcast-qual -Wswitch-default -Wswitch-enum -Wunreachable-code -Wpedantic -g
 

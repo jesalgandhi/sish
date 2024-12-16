@@ -18,4 +18,12 @@ void get_options(int argc, char **argv);
 /** sighandlers.c **/
 int install_handlers();
 
+/** tokenize.c **/
+void free_split_str(char **s);
+char **split_str(char *str, const char *delimiters, size_t *count);
+
+/** exec.c **/
+int exec_command(char *command);
+int exec_commands(char **commands, int cmd_cnt);
+
 #endif
