@@ -63,6 +63,8 @@ builtin_echo(char **tokens, size_t token_cnt)
 {
 	size_t i;
 	FILE *fp;
+	char *val;
+	char *varname;
 
 	fp = stdout;
 	if (tracing) {
@@ -70,18 +72,27 @@ builtin_echo(char **tokens, size_t token_cnt)
 	}
 
 	for (i = COMMAND_TARGET_IDX; i < token_cnt; i++) {
-		if (strlen(tokens[i]) == SP_VALS_SZ) {
-			if (strncmp(tokens[i], SP_VAL_EXIT_STATUS, SP_VALS_SZ) == 0) {
+		/* 0th index bc special/env vars always begin with '$' */
+		if (tokens[i][0] == '$') {
+			if (strcmp(tokens[i], "$?") == 0) {
 				fprintf(fp, "%d", last_exit_status);
-			}
-			if (strncmp(tokens[i], SP_VAL_PID, SP_VALS_SZ) == 0) {
-				fprintf(fp, "%d", getpid());
+			} else if (strcmp(tokens[i], "$$") == 0) {
+				fprintf(fp, "%d", (int)getpid());
+			} else {
+				/* +1 offset to retrieve env var name */
+				varname = tokens[i] + 1;
+				if ((val = getenv(varname)) != NULL) {
+					fprintf(fp, "%s", val);
+				} else {
+					continue;
+				}
 			}
 		} else {
 			fprintf(fp, "%s", tokens[i]);
 		}
 		fprintf(fp, " ");
 	}
+
 	fprintf(fp, "\n");
 	return 0;
 }
