@@ -46,6 +46,7 @@ main(int argc, char **argv)
 		    exit(EXIT_FAILURE);
 		}*/
 
+		exec_commands(commands, cmd_cnt);
 		free_split_str(commands);
 		exit(EXIT_SUCCESS);
 	}
@@ -84,11 +85,7 @@ main(int argc, char **argv)
 
 		commands = split_str(line, "|", &cmd_cnt);
 
-		if (exec_commands(commands, cmd_cnt) != 0) {
-			fprintf(stderr, "%s: %s\n", getprogname(),
-			        "failed to execute commands");
-		}
-
+		exec_commands(commands, cmd_cnt);
 		free_split_str(commands);
 	}
 
