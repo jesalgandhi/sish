@@ -1,0 +1,27 @@
+Jesal Gandhi
+
+`sish`
+
+Parsing the redirection tokens was a challenge due to the fact that a space is not required between the token and the filename (e.g. "cmd >/dev/null").
+
+Because I already split the command string by tokens with any whitespace as delimiters, this redirection logic created challenges.
+
+I had to create helpers to add spaces between all tokens (including redirection tokens) in the command, then split them by whitespace.
+
+Then based off if tokens were present, I would redirect the stdin/stdout.
+
+This causes issues with echo however, since as a builtin it simply just prints to stdout/stderr. I recognize the issue and have ideas on how to fix it but no time.
+
+(Regular redirection commands, such as "ls >file.txt", should still work).
+
+Non-working commands from manpage are listed below:
+`echo Writing a shell is fun! > /tmp/out`
+`< /tmp/out cat` - does not work because the first token is passed into execv, which obviously doesn't recognize it. Don't have time to change this.
+` find / >/dev/null &` - genuinely not sure how to fix this, the errors do not get redirected to /dev/null. Probably due to poor `&` logic.
+`aed -e <file >file.enc`
+
+I also put a lot of string manipulation functions inside of exec.c. I really should put those in a separate file, but again I unfortunately have limited time.
+
+As a final note, I really did enjoy this class, regardless of how many headaches and hard work it took, and appreciate these assignments.
+I genuinely feel much more confident not just working in C but with lower level concepts in general, and hope to apply these skills when I start working in February.
+Happy Holidays!

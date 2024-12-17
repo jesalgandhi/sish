@@ -188,7 +188,8 @@ builtin_cd(char **tokens, size_t token_cnt)
 	}
 
 	if (tracing) {
-		fprintf(stderr, "+ %s\n", tokens[COMMAND_IDX]);
+		fprintf(stderr, "+ %s %s \n", tokens[COMMAND_IDX],
+		        tokens[COMMAND_TARGET_IDX]);
 	}
 
 	if (token_cnt == 1) {
@@ -323,37 +324,16 @@ normalize_command(char *cmd)
 }
 
 int
-exec_command(char *command)
+run_command_in_child(char *command)
 {
-	pid_t pid;
-	char *in_file, *out_file, *cmd_src, *norm_cmd, **tokens, **redirs;
-	int status, in_fd, out_fd, flags;
+	char **tokens, **redirs;
+	char *norm_cmd, *in_file = NULL, *out_file = NULL, *cmd_src;
+	int in_fd = -1, out_fd = -1, flags;
+	bool append_mode = false;
 	size_t token_cnt;
-	bool append_mode;
 
-	in_file = NULL;
-	in_fd = -1;
-	out_file = NULL;
-	out_fd = -1;
-	append_mode = false;
-
-	/* check for exit */
-	if (strlen(command) == BUILTIN_EXIT_SZ &&
-	    strncmp(command, BUILTIN_EXIT, BUILTIN_EXIT_SZ) == 0) {
-		exit_flag = true;
-		last_exit_status = EXIT_SUCCESS;
-		return 0;
-	}
-
-	/* Retrieve redirections if present */
 	if (strstr(command, ">") || strstr(command, "<")) {
 		redirs = retrieve_redirects(command);
-		/* redirs layout:
-		 * [REDIR_STDOUT_IDX] = out_file (>)
-		 * [APPEND_STDOUT_IDX] = out_file (>>)
-		 * [REDIR_STDIN_IDX] = in_file (<)
-		 */
-
 		if (redirs[REDIR_STDIN_IDX]) {
 			in_file = redirs[REDIR_STDIN_IDX];
 		}
@@ -363,7 +343,6 @@ exec_command(char *command)
 		} else if (redirs[REDIR_STDOUT_IDX]) {
 			out_file = redirs[REDIR_STDOUT_IDX];
 		}
-		/* free redirs AFTER removing i/o tokens */
 	} else {
 		redirs = NULL;
 	}
@@ -371,42 +350,37 @@ exec_command(char *command)
 	norm_cmd = normalize_command(command);
 	tokens = split_str(norm_cmd, " \t\n", &token_cnt);
 	free(norm_cmd);
+
 	if (token_cnt == 0) {
 		if (redirs) {
 			free_redirs(redirs);
 		}
 		free_split_str(tokens);
-		return 0;
+		fprintf(stderr, "%s: empty command\n", getprogname());
+		_exit(STATUS_CMD_FAILED);
 	}
 
-	cmd_src = tokens[COMMAND_IDX];
+	cmd_src = tokens[0];
 
-	/* builtins */
 	if (strlen(cmd_src) == BUILTIN_CD_SZ &&
 	    strncmp(cmd_src, BUILTIN_CD, BUILTIN_CD_SZ) == 0) {
-		last_exit_status = builtin_cd(tokens, token_cnt);
-		free_split_str(tokens);
-		if (redirs) {
-			free_redirs(redirs);
-		}
-		return last_exit_status == 0 ? 0 : -1;
+		fprintf(stderr, "%s: cd not supported in pipeline\n", getprogname());
+		_exit(STATUS_CMD_FAILED);
 	}
+
 	if (strlen(cmd_src) == BUILTIN_ECHO_SZ &&
 	    strncmp(cmd_src, BUILTIN_ECHO, BUILTIN_ECHO_SZ) == 0) {
-		last_exit_status = builtin_echo(tokens, token_cnt);
-		free_split_str(tokens);
-		if (redirs) {
-			free_redirs(redirs);
+		if (builtin_echo(tokens, token_cnt) != 0) {
+			fprintf(stderr, "%s: echo failed\n", getprogname());
+			_exit(STATUS_CMD_FAILED);
 		}
-		return last_exit_status == 0 ? 0 : -1;
+		_exit(0);
 	}
 
-	/* remove redirection tokens from tokens array */
 	if (redirs) {
-		remove_redir_tokens(tokens, token_cnt);
+		remove_redir_tokens(tokens, (int)token_cnt);
 	}
 
-	/* only redir tokens given */
 	if (token_cnt == 0) {
 		if (redirs) {
 			free_redirs(redirs);
@@ -414,98 +388,225 @@ exec_command(char *command)
 		free_split_str(tokens);
 		fprintf(stderr, "%s: redirection operators require file args\n",
 		        getprogname());
-		return 0;
-	}
-
-	cmd_src = tokens[COMMAND_IDX];
-	/* fork + exec */
-	pid = fork();
-	if (pid < 0) {
-		perror("fork failed");
-		if (redirs) {
-			free_redirs(redirs);
-		}
-		free_split_str(tokens);
-		return -1;
-	}
-
-	if (pid == 0) {
-		if (tracing && dup2(STDERR_FILENO, STDOUT_FILENO) == -1) {
-			perror("dup2");
-			_exit(STATUS_CMD_FAILED);
-		}
-
-		if (in_file) {
-			in_fd = open(in_file, O_RDONLY);
-			if (in_fd < 0) {
-				perror(in_file);
-				_exit(STATUS_CMD_FAILED);
-			}
-			dup2(in_fd, STDIN_FILENO);
-			close(in_fd);
-		}
-
-		if (out_file) {
-			flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
-			out_fd = open(out_file, flags, 0666);
-			if (out_fd < 0) {
-				perror(out_file);
-				_exit(STATUS_CMD_FAILED);
-			}
-			dup2(out_fd, STDOUT_FILENO);
-			close(out_fd);
-		}
-
-		if (tracing) {
-			fprintf(stderr, "+ %s\n", command);
-		}
-
-		execvp(cmd_src, tokens);
-		fprintf(stderr, "%s: %s: not found\n", getprogname(), cmd_src);
 		_exit(STATUS_CMD_FAILED);
 	}
 
-	if (waitpid(pid, &status, 0) == -1) {
-		perror("waitpid failed");
-		if (redirs) {
-			free_redirs(redirs);
+	if (in_file) {
+		in_fd = open(in_file, O_RDONLY);
+		if (in_fd < 0) {
+			perror(in_file);
+			_exit(STATUS_CMD_FAILED);
 		}
+		dup2(in_fd, STDIN_FILENO);
+		close(in_fd);
+	}
+
+	if (out_file) {
+		flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
+		out_fd = open(out_file, flags, 0666);
+		if (out_fd < 0) {
+			perror(out_file);
+			_exit(STATUS_CMD_FAILED);
+		}
+		dup2(out_fd, STDOUT_FILENO);
+		close(out_fd);
+	}
+
+	if (tracing) {
+		fprintf(stderr, "+ %s\n", command);
+	}
+
+	execvp(cmd_src, tokens);
+	fprintf(stderr, "%s: %s: not found\n", getprogname(), cmd_src);
+	_exit(STATUS_CMD_FAILED);
+}
+
+int
+exec_command(char *command)
+{
+	pid_t pid;
+	int status;
+	bool background = false;
+	char *norm_cmd, **tokens;
+	size_t token_cnt;
+
+	if (strlen(command) == BUILTIN_EXIT_SZ &&
+	    strncmp(command, BUILTIN_EXIT, BUILTIN_EXIT_SZ) == 0) {
+		exit_flag = 1;
+		last_exit_status = EXIT_SUCCESS;
+		if (tracing) {
+			fprintf(stderr, "+ %s\n", command);
+		}
+		return 0;
+	}
+
+	norm_cmd = normalize_command(command);
+	tokens = split_str(norm_cmd, " \t\n", &token_cnt);
+	free(norm_cmd);
+
+	if (token_cnt == 0) {
+		free_split_str(tokens);
+		return 0;
+	}
+
+	if (strcmp(tokens[token_cnt - 1], "&") == 0) {
+		background = true;
+		tokens[token_cnt - 1] = NULL;
+		token_cnt--;
+	}
+
+	if (token_cnt > 0 && strlen(tokens[0]) == BUILTIN_CD_SZ &&
+	    strncmp(tokens[0], BUILTIN_CD, BUILTIN_CD_SZ) == 0) {
+		last_exit_status = builtin_cd(tokens, token_cnt);
+		free_split_str(tokens);
+		return last_exit_status == 0 ? 0 : -1;
+	}
+
+	if (token_cnt > 0 && strlen(tokens[0]) == BUILTIN_ECHO_SZ &&
+	    strncmp(tokens[0], BUILTIN_ECHO, BUILTIN_ECHO_SZ) == 0) {
+		last_exit_status = builtin_echo(tokens, token_cnt);
+		free_split_str(tokens);
+		return last_exit_status == 0 ? 0 : -1;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		perror("fork failed");
 		free_split_str(tokens);
 		return -1;
 	}
-
-	if (WIFEXITED(status)) {
-		last_exit_status = WEXITSTATUS(status);
-	} else {
-		last_exit_status = STATUS_CMD_FAILED;
-	}
-
-	if (redirs) {
-		free_redirs(redirs);
+	if (pid == 0) {
+		run_command_in_child(command);
 	}
 	free_split_str(tokens);
-	return (last_exit_status == 0) ? 0 : -1;
+
+	if (background) {
+		printf("%d\n", (int)pid);
+		last_exit_status = 0;
+		return 0;
+	} else {
+		if (waitpid(pid, &status, 0) == -1) {
+			perror("waitpid failed");
+			return -1;
+		}
+		if (WIFEXITED(status)) {
+			last_exit_status = WEXITSTATUS(status);
+		} else {
+			last_exit_status = STATUS_CMD_FAILED;
+		}
+		return (last_exit_status == 0) ? 0 : -1;
+	}
 }
 
 void
 exec_commands(char **commands, int cmd_cnt)
 {
-	size_t i;
-
-	(void)i;
+	bool background = false;
+	int i, j, status;
+	int *pipes;
+	int final_status = 0;
+	pid_t pid;
 
 	if (cmd_cnt < 1) {
 		return;
 	}
 
-	/* exec single command */
-	if (cmd_cnt < 2) {
-		exec_command(commands[COMMAND_IDX]);
+	if (cmd_cnt == 1) {
+		char *cmd = commands[0];
+		size_t len = strlen(cmd);
+		if (len > 0 && cmd[len - 1] == '&') {
+			background = true;
+			commands[0][len - 1] = '\0';
+			while (len > 0 && isspace((unsigned char)cmd[len - 1])) {
+				commands[0][len - 1] = '\0';
+				len--;
+			}
+		}
+		if (!background) {
+			exec_command(commands[0]);
+		} else {
+			pid = fork();
+			if (pid < 0) {
+				perror("fork failed");
+				return;
+			}
+			if (pid == 0) {
+				run_command_in_child(commands[0]);
+			}
+			printf("%d\n", (int)pid);
+			last_exit_status = 0;
+		}
 		return;
 	}
 
-	/* exec multiple commands and connect with pipes */
+	pipes = malloc(sizeof(int) * 2 * (cmd_cnt - 1));
+	if (!pipes) {
+		return;
+	}
 
+	for (i = 0; i < cmd_cnt - 1; i++) {
+		if (pipe(&pipes[i * 2]) < 0) {
+			perror("pipe");
+			free(pipes);
+			return;
+		}
+	}
 
-	return;
+	for (i = 0; i < cmd_cnt; i++) {
+		pid = fork();
+		if (pid < 0) {
+			perror("fork");
+			free(pipes);
+			return;
+		}
+		if (pid == 0) {
+			if (i > 0) {
+				dup2(pipes[(i - 1) * 2], STDIN_FILENO);
+			}
+			if (i < cmd_cnt - 1) {
+				dup2(pipes[i * 2 + 1], STDOUT_FILENO);
+			}
+			for (j = 0; j < 2 * (cmd_cnt - 1); j++) {
+				close(pipes[j]);
+			}
+			run_command_in_child(commands[i]);
+		} else {
+			if (i == cmd_cnt - 1 &&
+			    commands[i][strlen(commands[i]) - 1] == '&') {
+				background = true;
+				commands[i][strlen(commands[i]) - 1] = '\0';
+				while (
+					strlen(commands[i]) > 0 &&
+					isspace(
+						(unsigned char)commands[i][strlen(commands[i]) - 1])) {
+					commands[i][strlen(commands[i]) - 1] = '\0';
+				}
+				printf("%d\n", (int)pid);
+			}
+		}
+	}
+
+	for (i = 0; i < 2 * (cmd_cnt - 1); i++) {
+		close(pipes[i]);
+	}
+	free(pipes);
+
+	if (!background) {
+		for (i = 0; i < cmd_cnt; i++) {
+			if (wait(&status) == -1) {
+				perror("wait");
+				final_status = STATUS_CMD_FAILED;
+			} else {
+				if (WIFEXITED(status)) {
+					int s = WEXITSTATUS(status);
+					if (s != 0 && final_status == 0) {
+						final_status = s;
+					}
+				} else {
+					final_status = STATUS_CMD_FAILED;
+				}
+			}
+		}
+		last_exit_status = final_status;
+	}
 }
