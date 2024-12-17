@@ -29,26 +29,12 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	/*
-	TODO single command mode
-	 */
+	/* single command mode */
 	if (c_cmd != NULL) {
 		commands = split_str(c_cmd, "|", &cmd_cnt);
-		if (cmd_cnt <= 0) {
-			fprintf(stderr, "%s: provide at least one command\n",
-			        getprogname());
-			free_split_str(commands);
-			exit(EXIT_FAILURE);
-		}
-
-		/*if (exec_commands(commands, cmd_cnt) != 0) {
-		    free_split_str(commands);
-		    exit(EXIT_FAILURE);
-		}*/
-
 		exec_commands(commands, cmd_cnt);
 		free_split_str(commands);
-		exit(EXIT_SUCCESS);
+		exit(last_exit_status);
 	}
 
 	/* shell mode */
@@ -60,6 +46,7 @@ main(int argc, char **argv)
 			printf("\n");
 			sig_recv = 0;
 		}
+
 		printf("sish$ ");
 		fflush(stdout);
 
@@ -84,11 +71,10 @@ main(int argc, char **argv)
 		}
 
 		commands = split_str(line, "|", &cmd_cnt);
-
 		exec_commands(commands, cmd_cnt);
 		free_split_str(commands);
 	}
 
 	free(line);
-	exit(EXIT_SUCCESS);
+	exit(last_exit_status);
 }
